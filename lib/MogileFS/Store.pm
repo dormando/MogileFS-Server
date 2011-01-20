@@ -1441,6 +1441,18 @@ sub create_domain {
     die "failed to make domain";  # FIXME: the above is racy.
 }
 
+sub update_host {
+    my ($self, $host, $to_update) = @_;
+    my @keys = sort keys %$to_update;
+    return unless @keys;
+    $self->conddup(sub {
+        $self->dbh->do("UPDATE host SET " . join('=? ', @keys)
+            . "=? WHERE hostid=?", undef, map { $to_update->{$_} } @keys,
+            $host->id);
+    });
+    return 1;
+}
+
 sub update_host_property {
     my ($self, $hostid, $col, $val) = @_;
     $self->conddup(sub {
