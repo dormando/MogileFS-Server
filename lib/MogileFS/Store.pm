@@ -1042,6 +1042,18 @@ sub create_device {
     return 1;
 }
 
+sub update_device {
+    my ($self, $dev, $to_update) = @_;
+    my @keys = sort keys %$to_update;
+    return unless @keys;
+    $self->conddup(sub {
+        $self->dbh->do("UPDATE device SET " . join('=? ', @keys)
+            . "=? WHERE hostid=?", undef, map { $to_update->{$_} } @keys,
+            $dev->id);
+    });
+    return 1;
+}
+
 sub update_device_usage {
     my $self = shift;
     my %arg  = $self->_valid_params([qw(mb_total mb_used devid)], @_);

@@ -18,7 +18,7 @@ use Data::Dumper qw/Dumper/;
 
 my $sto = eval { temp_store(); };
 if ($sto) {
-    plan tests => 30;
+    plan tests => 41;
 } else {
     plan skip_all => "Can't create temporary test database: $@";
     exit 0;
@@ -118,22 +118,58 @@ ok($domfac != $classfac, "factories are not the same singleton");
     ok($dom->add_to_db, 'added domain to db store');
     ok($dom->id, 'new domain now has an id: ' . $dom->id);
 
-    my $cls1 = MogileFS::NewClass->new_from_args({ classid => 1, dmid => $dom->id,
-        mindevcount => 2, replpolicy => '', classname => 'bar' }, $domfac);
-    my $cls2 = MogileFS::NewClass->new_from_args({ classid => 2, dmid => $dom->id,
-        mindevcount => 3, replpolicy => 'MultipleHosts(6)',
+    # Classes are so weird :( No "save_to_db" nor full object on create
+    # feature.
+    my $cls1 = MogileFS::NewClass->new_from_args({ dmid => $dom->id,
+        classname => 'bar' }, $domfac);
+    my $cls2 = MogileFS::NewClass->new_from_args({ dmid => $dom->id,
         classname => 'baz' }, $domfac);
     is($cls1->name, 'bar', 'class1 is named bar');
     ok($cls1->add_to_db, 'added class bar to db');
     ok($cls2->add_to_db, 'added class baz to db');
+    is($cls1->id, 1, 'class1 got id 1');
+    is($cls2->id, 2, 'class2 got id 2');
+
+    # cls1 gets defaults
+    # cls2 gets rename from baz to boo, mindev 3, MultipleHosts(6)
+    ok($cls2->set_mindevcount(3), 'can set mindevcount');
+    ok($cls2->set_replpolicy('MultipleHosts(6)'), 'can set replpolicy');
+    ok($cls2->set_name('boo'), 'can rename class');
 
     # TODO: Test double adding domains and classes.
+
+    # Forget about them from the cache.
+    $classfac->remove($cls1);
+    $classfac->remove($cls2);
+
+    # Ensure they're gone from the cache.
+    ok(!$classfac->get_by_name($dom, 'bar'), 'class bar is gone from cache');
+    ok(!$classfac->get_by_name($dom, 'baz'), 'class baz is gone from cache');
+
+    # Forget the domain too.
+    $domfac->remove($dom);
+    ok(!$domfac->get_by_name('foo'), 'domain foo is gone from cache');
 }
 
-# Forget about them from the cache.
-
-# Ensure they're gone from the cache.
-
-# Reload from the DB and confirm they came back the way they went in.
-
-# Update a class name, mindevcount, replpolicy.
+{
+    # Reload from the DB and confirm they came back the way they went in.
+    my %domains = $sto->get_all_domains;
+    ok(exists $domains{foo}, 'domain foo exists');
+    is($domains{foo}, 1, 'and the id is 1');
+    my @classes = $sto->get_all_classes;
+    is_deeply($classes[0], {
+        'replpolicy' => undef,
+        'dmid' => '1',
+        'classid' => '1',
+        'mindevcount' => '2',
+        'classname' => 'bar'
+    }, 'class bar came back');
+    # We edited class2 a bunch, make sure that all stuck. 
+    is_deeply($classes[1], {
+        'replpolicy' => 'MultipleHosts(6)',
+        'dmid' => '1',
+        'classid' => '2',
+        'mindevcount' => '3',
+        'classname' => 'boo'
+    }, 'class baz came back as boo');
+}

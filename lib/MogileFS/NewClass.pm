@@ -13,6 +13,7 @@ sub new_from_args {
     my ($class, $args, $domain_factory) = @_;
     return bless {
         domain_factory => $domain_factory,
+        mindevcount => 2,
         %{$args},
     }, $class;
 }

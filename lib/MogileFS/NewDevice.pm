@@ -58,6 +58,32 @@ sub t_init {
     $self->{mb_used}  = 100;
 }
 
+sub add_to_db {
+    my $self = shift;
+    my $devid = Mgd::get_store()->create_device($self->id, $self->hostid,
+        $self->{status});
+    return $devid;
+}
+
+sub save_to_db {
+    my $self = shift;
+    return 0 unless Mgd::get_store()->update_device($self, $self->fields(@_));
+    return 1;
+}
+
+# This is unimplemented at the moment as we must verify:
+# - no file_on rows exist
+# - nothing in file_to_queue is going to attempt to use it
+# - nothing in file_to_replicate is going to attempt to use it
+# - it's already been marked dead
+# - that all trackers are likely to know this :/
+# - ensure the devid can't be reused
+# IE; the user can't mark it dead then remove it all at once and cause their
+# cluster to implode.
+sub remove_from_db {
+    die "Unimplemented; needs further testing";
+}
+
 sub host {
     my $self = shift;
     return $self->{host_factory}->get_by_id($self->{hostid});
@@ -138,7 +164,6 @@ sub should_get_new_files {
 
     return 0 unless $dstate->should_get_new_files;
     return 0 unless $self->observed_writeable;
-    print STDERR "Got this far\n";
     return 0 unless $self->host->should_get_new_files;
     # have enough disk space? (default: 100MB)
     my $min_free = MogileFS->config("min_free_space");
@@ -205,8 +230,7 @@ sub create_directory {
     # if they don't support this method, remember that
     if ($ans && $ans =~ m!HTTP/1\.[01] (400|501)!) {
         $self->{no_mkcol} = 1;
-        # TODO: move this into method on device, which propagates to parent
-        # and also receive from parent.  so all query workers share this knowledge
+        # TODO: move this into method in *monitor* worker
         return 1;
     }
 

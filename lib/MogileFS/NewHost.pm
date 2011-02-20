@@ -77,7 +77,7 @@ sub add_to_db {
 # Replace the host object back into the DB.
 sub save_to_db {
     my $self = shift;
-    return 0 unless Mgd::get_stored()->update_host($self, $self->fields(@_));
+    return 0 unless Mgd::get_store()->update_host($self, $self->fields(@_));
     return 1;
 }
 

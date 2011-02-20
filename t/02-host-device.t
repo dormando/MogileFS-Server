@@ -18,7 +18,7 @@ use Data::Dumper qw/Dumper/;
 
 my $sto = eval { temp_store(); };
 if ($sto) {
-    plan tests => 30;
+    plan tests => 12;
 } else {
     plan skip_all => "Can't create temporary test database: $@";
     exit 0;
@@ -29,6 +29,8 @@ my $hostfac = MogileFS::HostFactory->get_factory;
 ok($hostfac, "got a host factory");
 my $devfac = MogileFS::DeviceFactory->get_factory;
 ok($devfac, "got a device factory");
+
+MogileFS::Config->set_config_no_broadcast("min_free_space", 100);
 
 # Ensure the inherited singleton is good.
 ok($hostfac != $devfac, "factories are not the same singleton");
@@ -53,3 +55,17 @@ observed_state => 'writeable'}, $hostfac);
     ok($dev->can_read_from, 'can_read_from works');
     ok($dev->should_get_new_files, 'should_get_new_files works');
 }
+
+# Might be able to skip the factory tests, as domain/class cover those.
+
+# Add a host and two devices to the DB.
+
+# Forget about them from the cache.
+
+# Ensure they're gone from the cache.
+
+# Reload from DB and confirm they match what we had before.
+
+# Update host details to DB and ensure they stick.
+
+# Update device details in DB and ensure they stick.
