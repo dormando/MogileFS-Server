@@ -17,7 +17,7 @@ BEGIN {
 }
 
 my @fields = qw/hostid status weight observed_state mb_total mb_used mb_asof
-utilization/;
+utilization devid/;
 
 sub new_from_args {
     my ($class, $args, $host_factory) = @_;
@@ -60,9 +60,8 @@ sub t_init {
 
 sub add_to_db {
     my $self = shift;
-    my $devid = Mgd::get_store()->create_device($self->id, $self->hostid,
+    return Mgd::get_store()->create_device($self->id, $self->hostid,
         $self->{status});
-    return $devid;
 }
 
 sub save_to_db {

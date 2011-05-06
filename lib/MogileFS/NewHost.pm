@@ -13,7 +13,7 @@ MogileFS::NewHost - host class
 =cut
 
 # Centralized here instead of three places.
-my @fields = qw/hostname hostip status http_port http_get_port altip altmask/;
+my @fields = qw/hostid hostname hostip status http_port http_get_port altip altmask/;
 
 # TODO: Validate a few things: state, observed state.
 sub new_from_args {
@@ -70,7 +70,7 @@ sub should_get_new_files {
 
 sub add_to_db {
     my $self = shift;
-    my $hid = Mgd::get_store()->create_host($self->name, $self->{ip});
+    my $hid = Mgd::get_store()->create_host($self->name, $self->{hostip});
     $self->{hostid} = $hid;
 }
 
