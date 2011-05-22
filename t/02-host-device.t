@@ -8,9 +8,9 @@ use FindBin qw($Bin);
 use MogileFS::Server;
 use MogileFS::Util qw(error_code);
 use MogileFS::Test;
-use MogileFS::MogFactory;
-use MogileFS::HostFactory;
-use MogileFS::DeviceFactory;
+use MogileFS::Factory;
+use MogileFS::Factory::Host;
+use MogileFS::Factory::Device;
 use MogileFS::NewHost;
 use MogileFS::NewDevice;
 
@@ -25,9 +25,9 @@ if ($sto) {
 }
 
 # Fetch the factories.
-my $hostfac = MogileFS::HostFactory->get_factory;
+my $hostfac = MogileFS::Factory::Host->get_factory;
 ok($hostfac, "got a host factory");
-my $devfac = MogileFS::DeviceFactory->get_factory;
+my $devfac = MogileFS::Factory::Device->get_factory;
 ok($devfac, "got a device factory");
 
 MogileFS::Config->set_config_no_broadcast("min_free_space", 100);

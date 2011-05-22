@@ -1,7 +1,7 @@
-package MogileFS::ClassFactory;
+package MogileFS::Factory::Class;
 use strict;
 use warnings;
-use base 'MogileFS::MogFactory';
+use base 'MogileFS::Factory';
 
 use MogileFS::NewClass;
 
@@ -10,7 +10,7 @@ use MogileFS::NewClass;
 # Stupid/wasteful.
 sub set {
     my ($self, $domain, $args) = @_;
-    my $domain_factory = MogileFS::DomainFactory->get_factory;
+    my $domain_factory = MogileFS::Factory::Domain->get_factory;
     # FIXME: Inject the dmid into the class somehow.
     my $class = MogileFS::NewClass->new_from_args($args, $domain_factory);
     $self->{by_id}->{$domain->id}->{$class->id}     = $class;

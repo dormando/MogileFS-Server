@@ -1,4 +1,4 @@
-package MogileFS::MogFactory;
+package MogileFS::Factory;
 use strict;
 use warnings;
 

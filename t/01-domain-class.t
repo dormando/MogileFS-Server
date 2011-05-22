@@ -8,9 +8,9 @@ use FindBin qw($Bin);
 use MogileFS::Server;
 use MogileFS::Util qw(error_code);
 use MogileFS::Test;
-use MogileFS::MogFactory;
-use MogileFS::DomainFactory;
-use MogileFS::ClassFactory;
+use MogileFS::Factory;
+use MogileFS::Factory::Domain;
+use MogileFS::Factory::Class;
 use MogileFS::NewDomain;
 use MogileFS::NewClass;
 
@@ -25,9 +25,9 @@ if ($sto) {
 }
 
 # Fetch the factories.
-my $domfac = MogileFS::DomainFactory->get_factory;
+my $domfac = MogileFS::Factory::Domain->get_factory;
 ok($domfac, "got a domain factory");
-my $classfac = MogileFS::ClassFactory->get_factory;
+my $classfac = MogileFS::Factory::Class->get_factory;
 ok($classfac, "got a class factory");
 
 # Ensure the inherited singleton is good.
