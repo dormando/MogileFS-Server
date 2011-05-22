@@ -18,7 +18,7 @@ use Data::Dumper qw/Dumper/;
 
 my $sto = eval { temp_store(); };
 if ($sto) {
-    plan tests => 41;
+    plan tests => 33;
 } else {
     plan skip_all => "Can't create temporary test database: $@";
     exit 0;
@@ -113,42 +113,20 @@ ok($domfac != $classfac, "factories are not the same singleton");
 
 # Add a domain and two classes to the DB.
 {
-    my $dom = MogileFS::NewDomain->new_from_args({namespace => 'foo'}, $classfac);
-    ok(!$dom->id, 'new domain has no id');
-    ok($dom->add_to_db, 'added domain to db store');
-    ok($dom->id, 'new domain now has an id: ' . $dom->id);
+    my $domid = $sto->create_domain('foo');
+    ok($domid, 'new domain stored in database: ' . $domid);
 
-    # Classes are so weird :( No "save_to_db" nor full object on create
-    # feature.
-    my $cls1 = MogileFS::NewClass->new_from_args({ dmid => $dom->id,
-        classname => 'bar' }, $domfac);
-    my $cls2 = MogileFS::NewClass->new_from_args({ dmid => $dom->id,
-        classname => 'baz' }, $domfac);
-    is($cls1->name, 'bar', 'class1 is named bar');
-    ok($cls1->add_to_db, 'added class bar to db');
-    ok($cls2->add_to_db, 'added class baz to db');
-    is($cls1->id, 1, 'class1 got id 1');
-    is($cls2->id, 2, 'class2 got id 2');
+    my $clsid1 = $sto->create_class($domid, 'bar');
+    my $clsid2 = $sto->create_class($domid, 'baz');
+    is($clsid1, 1, 'new class1 stored in database');
+    is($clsid2, 2, 'new class2 stored in database');
 
-    # cls1 gets defaults
-    # cls2 gets rename from baz to boo, mindev 3, MultipleHosts(6)
-    ok($cls2->set_mindevcount(3), 'can set mindevcount');
-    ok($cls2->set_replpolicy('MultipleHosts(6)'), 'can set replpolicy');
-    ok($cls2->set_name('boo'), 'can rename class');
-
-    # TODO: Test double adding domains and classes.
-
-    # Forget about them from the cache.
-    $classfac->remove($cls1);
-    $classfac->remove($cls2);
-
-    # Ensure they're gone from the cache.
-    ok(!$classfac->get_by_name($dom, 'bar'), 'class bar is gone from cache');
-    ok(!$classfac->get_by_name($dom, 'baz'), 'class baz is gone from cache');
-
-    # Forget the domain too.
-    $domfac->remove($dom);
-    ok(!$domfac->get_by_name('foo'), 'domain foo is gone from cache');
+    ok($sto->update_class_mindevcount(dmid => $domid, classid => $clsid2,
+        mindevcount => 3), 'can set mindevcount');
+    ok($sto->update_class_replpolicy(dmid => $domid, classid => $clsid2,
+        replpolicy => 'MultipleHosts(6)'), 'can set replpolicy');
+    ok($sto->update_class_name(dmid => $domid, classid => $clsid2,
+        classname => 'boo'), 'can rename class');
 }
 
 {

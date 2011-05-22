@@ -341,6 +341,7 @@ sub conddup {
     my ($self, $code) = @_;
     my $rv = eval { $code->(); };
     throw("dup") if $self->was_duplicate_error;
+    croak($@) if $@;
     return $rv;
 }
 
@@ -735,6 +736,8 @@ sub delete_host {
 # return true if deleted, 0 if didn't exist, exception if error
 sub delete_domain {
     my ($self, $dmid) = @_;
+    throw("has_files")   if $self->domain_has_files($dmid);
+    throw("has_classes") if $self->domain_has_classes($dmid);
     return $self->dbh->do("DELETE FROM domain WHERE dmid = ?", undef, $dmid);
 }
 
@@ -743,6 +746,13 @@ sub domain_has_files {
     my $has_a_fid = $self->dbh->selectrow_array('SELECT fid FROM file WHERE dmid = ? LIMIT 1',
                                                 undef, $dmid);
     return $has_a_fid ? 1 : 0;
+}
+
+sub domain_has_classes {
+    my ($self, $dmid) = @_;
+    my $has_a_class = $self->dbh->selectrow_array('SELECT classid FROM class WHERE dmid = ? LIMIT 1',
+        undef, $dmid);
+    return $has_a_class ? 1 : 0;
 }
 
 sub class_has_files {
@@ -1043,13 +1053,13 @@ sub create_device {
 }
 
 sub update_device {
-    my ($self, $dev, $to_update) = @_;
+    my ($self, $devid, $to_update) = @_;
     my @keys = sort keys %$to_update;
     return unless @keys;
     $self->conddup(sub {
-        $self->dbh->do("UPDATE device SET " . join('=? ', @keys)
-            . "=? WHERE hostid=?", undef, map { $to_update->{$_} } @keys,
-            $dev->id);
+        $self->dbh->do("UPDATE device SET " . join('=?, ', @keys)
+            . "=? WHERE devid=?", undef, (map { $to_update->{$_} } @keys),
+            $devid);
     });
     return 1;
 }
@@ -1062,6 +1072,19 @@ sub update_device_usage {
                        " WHERE devid = ?", undef, $arg{mb_total}, $arg{mb_used}, $arg{devid});
     };
     $self->condthrow;
+}
+
+# This is unimplemented at the moment as we must verify:
+# - no file_on rows exist
+# - nothing in file_to_queue is going to attempt to use it
+# - nothing in file_to_replicate is going to attempt to use it
+# - it's already been marked dead
+# - that all trackers are likely to know this :/
+# - ensure the devid can't be reused
+# IE; the user can't mark it dead then remove it all at once and cause their
+# cluster to implode.
+sub delete_device {
+    die "Unimplemented; needs further testing";
 }
 
 sub mark_fidid_unreachable {
@@ -1089,6 +1112,7 @@ sub set_device_state {
 
 sub delete_class {
     my ($self, $dmid, $cid) = @_;
+    throw("has_files") if $self->class_has_files($dmid, $cid);
     eval {
         $self->dbh->do("DELETE FROM class WHERE dmid = ? AND classid = ?", undef, $dmid, $cid);
     };
@@ -1454,13 +1478,13 @@ sub create_domain {
 }
 
 sub update_host {
-    my ($self, $host, $to_update) = @_;
+    my ($self, $hid, $to_update) = @_;
     my @keys = sort keys %$to_update;
     return unless @keys;
     $self->conddup(sub {
-        $self->dbh->do("UPDATE host SET " . join('=? ', @keys)
-            . "=? WHERE hostid=?", undef, map { $to_update->{$_} } @keys,
-            $host->id);
+        $self->dbh->do("UPDATE host SET " . join('=?, ', @keys)
+            . "=? WHERE hostid=?", undef, (map { $to_update->{$_} } @keys),
+            $hid);
     });
     return 1;
 }

@@ -68,24 +68,6 @@ sub should_get_new_files {
     return $_[0]->status eq 'alive';
 }
 
-sub add_to_db {
-    my $self = shift;
-    my $hid = Mgd::get_store()->create_host($self->name, $self->{hostip});
-    $self->{hostid} = $hid;
-}
-
-# Replace the host object back into the DB.
-sub save_to_db {
-    my $self = shift;
-    return 0 unless Mgd::get_store()->update_host($self, $self->fields(@_));
-    return 1;
-}
-
-sub remove_from_db {
-    my $self = shift;
-    return Mgd::get_store()->delete_host($self->id);
-}
-
 sub t_init {
     my $self = shift;
     my $status = shift;

@@ -58,31 +58,6 @@ sub t_init {
     $self->{mb_used}  = 100;
 }
 
-sub add_to_db {
-    my $self = shift;
-    return Mgd::get_store()->create_device($self->id, $self->hostid,
-        $self->{status});
-}
-
-sub save_to_db {
-    my $self = shift;
-    return 0 unless Mgd::get_store()->update_device($self, $self->fields(@_));
-    return 1;
-}
-
-# This is unimplemented at the moment as we must verify:
-# - no file_on rows exist
-# - nothing in file_to_queue is going to attempt to use it
-# - nothing in file_to_replicate is going to attempt to use it
-# - it's already been marked dead
-# - that all trackers are likely to know this :/
-# - ensure the devid can't be reused
-# IE; the user can't mark it dead then remove it all at once and cause their
-# cluster to implode.
-sub remove_from_db {
-    die "Unimplemented; needs further testing";
-}
-
 sub host {
     my $self = shift;
     return $self->{host_factory}->get_by_id($self->{hostid});

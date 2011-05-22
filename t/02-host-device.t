@@ -18,7 +18,7 @@ use Data::Dumper qw/Dumper/;
 
 my $sto = eval { temp_store(); };
 if ($sto) {
-    plan tests => 20;
+    plan tests => 21;
 } else {
     plan skip_all => "Can't create temporary test database: $@";
     exit 0;
@@ -63,32 +63,33 @@ observed_state => 'writeable'});
 
 {
     # Add a host and two devices to the DB.
-    my $host = MogileFS::NewHost->new_from_args({ hostname => 'foo',
-        hostip => '127.0.0.7' }, $devfac);
+    my $hostid = $sto->create_host('foo', '127.0.0.7');
+    is($hostid, 1, 'new host got id 1');
 
-    is($host->add_to_db, 1, 'new host got id 1');
+    # returns 1 instead of the devid :(
+    # since this it the only place which doesn't autogenerate its id.
+    ok($sto->create_device(1, $hostid, 'alive'), 'created dev1');
+    ok($sto->create_device(2, $hostid, 'down'), 'created dev2');
 
-    # It's not possible to pass a prebuilt object into the cache, as the only
-    # place which should ever update the cache should be dealing with
-    # serialized objects. These tests are outside of that pattern.
-    $host = $hostfac->set($host->fields);
+    # Update host details to DB and ensure they stick.
+    ok($sto->update_host($hostid, { http_port => 6500, http_get_port => 6501 }),
+        'updated host DB entry');
+    # Update device details in DB and ensure they stick.
+    ok($sto->update_device(1, { mb_total => 150, mb_used => 8 }),
+        'updated dev1 DB entry');
+    ok($sto->update_device(2, { mb_total => 100, mb_used => 3,
+        status => 'dead' }), 'updated dev2 DB entry');
+}
 
-    my $dev1 = MogileFS::NewDevice->new_from_args({ devid => 1, hostid => 1,
-        status => 'alive', observed_state => 'unreachable' }, $hostfac);
-    my $dev2 = MogileFS::NewDevice->new_from_args({ devid => 2, hostid => 1,
-        status => 'down', observed_state => 'writeable' }, $hostfac);
-
-    is($dev1->add_to_db, 1, 'new dev1 succeeded');
-    is($dev2->add_to_db, 1, 'new dev2 succeeded');
-
+{
     # Reload from DB and confirm they match what we had before.
     my @hosts = $sto->get_all_hosts;
     my @devs  = $sto->get_all_devices;
 
     is_deeply($hosts[0], {
-            'http_get_port' => undef,
+            'http_get_port' => 6501,
             'status' => 'down',
-            'http_port' => '7500',
+            'http_port' => '6500',
             'hostip' => '127.0.0.7',
             'hostname' => 'foo',
             'hostid' => '1',
@@ -97,8 +98,8 @@ observed_state => 'writeable'});
     }, 'host is as expected');
 
     is_deeply($devs[0], {
-            'mb_total' => undef,
-            'mb_used' => undef,
+            'mb_total' => 150,
+            'mb_used' => 8,
             'status' => 'alive',
             'devid' => '1',
             'weight' => '100',
@@ -106,17 +107,13 @@ observed_state => 'writeable'});
             'hostid' => '1'
     }, 'dev1 is as expected');
     is_deeply($devs[1], {
-            'mb_total' => undef,
-            'mb_used' => undef,
-            'status' => 'down',
+            'mb_total' => 100,
+            'mb_used' => 3,
+            'status' => 'dead',
             'devid' => '2',
             'weight' => '100',
             'mb_asof' => undef,
             'hostid' => '1'
     }, 'dev2 is as expected');
-
-    # Update host details to DB and ensure they stick.
-
-
-    # Update device details in DB and ensure they stick.
 }
+
