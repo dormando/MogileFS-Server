@@ -164,7 +164,7 @@ sub check_domain {
     return $self->err_line("no_domain") unless defined $domain && length $domain;
 
     # validate domain
-    my $dmid = Mgd::domain_factory()->get_by_name($domain)->id or
+    my $dmid = eval { Mgd::domain_factory()->get_by_name($domain)->id } or
         return $self->err_line("unreg_domain");
 
     return $dmid;
@@ -231,7 +231,7 @@ sub cmd_create_open {
     my $class = $args->{class} || "";
     my $classid = 0;
     if (length($class)) {
-        $classid = MogileFS::Class->class_id($dmid, $class)
+        $classid = eval { Mgd::class_factory()->get_by_name($dmid, $class)->id }
             or return $self->err_line("unreg_class");
     }
 
@@ -461,7 +461,7 @@ sub cmd_updateclass {
     my $key   = $args->{key}        or return $self->err_line("no_key");
     my $class = $args->{class}      or return $self->err_line("no_class");
 
-    my $classid = MogileFS::Class->class_id($dmid, $class)
+    my $classid = eval { Mgd::class_factory()->get_by_name($dmid, $class)->id }
         or return $self->err_line('class_not_found');
 
     my $fid = MogileFS::FID->new_from_dmid_and_key($dmid, $key)
@@ -1252,13 +1252,13 @@ sub cmd_edit_file {
     # Take first remaining device from list
     my $devid = $list[0];
 
-    my $class = MogileFS::Class->of_fid($fid);
+    my $classid = $fid->classid;
     my $newfid = eval {
         Mgd::get_store()->register_tempfile(
             fid     => undef,   # undef => let the store pick a fid
             dmid    => $dmid,
             key     => $key,    # This tempfile will ultimately become this key
-            classid => $class->classid,
+            classid => $classid,
             devids  => $devid,
         );
     };
@@ -1286,7 +1286,7 @@ sub cmd_edit_file {
     $ret->{newpath} = $paths[1];
     $ret->{fid} = $newfid;
     $ret->{devid} = $devid;
-    $ret->{class} = $class->classid;
+    $ret->{class} = $classid;
     return $self->ok_line($ret);
 }
 
