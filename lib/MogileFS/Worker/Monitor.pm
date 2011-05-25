@@ -110,7 +110,7 @@ sub work {
 
         $self->{prev_data} = $new_data;
         $self->send_events_to_parent;
-        Danga::Socket->AddTimer(10, $db_monitor);
+        Danga::Socket->AddTimer(4, $db_monitor);
         print STDERR "New monitor for db finished\n";
     };
 
