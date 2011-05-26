@@ -141,7 +141,8 @@ sub send_events_to_parent {
     }
     return unless @flat;
     $self->{events} = [];
-    print STDERR "SENDING STATE CHANGES ", join(' ', ':monitor_events', @flat), "\n";
+    # TODO: Maybe wasting too much CPU building this debug line every time...
+    debug("sending state changes " . join(' ', ':monitor_events', @flat), 2);
     $self->send_to_parent(join(' ', ':monitor_events', @flat));
 }
 
