@@ -45,22 +45,6 @@ sub status { return $_[0]{status} }
 sub weight { return $_[0]{weight} }
 sub hostid { return $_[0]{hostid} }
 
-# FIXME: This shouldn't be necessary anymore?
-sub t_init {
-    my ($self, $hostid, $state) = @_;
-
-    my $dstate = device_state($state) or
-        die "Bogus state";
-
-    $self->{hostid}  = $hostid;
-    $self->{status}  = $state;
-    $self->{observed_state} = "writeable";
-
-    # say it's 10% full, of 1GB
-    $self->{mb_total} = 1000;
-    $self->{mb_used}  = 100;
-}
-
 sub host {
     my $self = shift;
     return $self->{host_factory}->get_by_id($self->{hostid});

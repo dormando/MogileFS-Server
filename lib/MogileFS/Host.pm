@@ -74,13 +74,6 @@ sub should_get_new_files {
     return $_[0]->status eq 'alive';
 }
 
-sub t_init {
-    my $self = shift;
-    my $status = shift;
-    $self->{status}  = $status;
-    $self->{observed_state} = "reachable";
-}
-
 sub observed_reachable {
     my $self = shift;
     return $self->{observed_state} && $self->{observed_state} eq 'reachable';
