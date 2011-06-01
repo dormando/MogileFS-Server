@@ -97,7 +97,8 @@ ok($domfac != $classfac, "factories are not the same singleton");
 {
     my $dom = $domfac->get_by_name('harro');
     my @classes = $dom->classes;
-    is(scalar(@classes), 2, 'found two classes');
+    # Magic "default" class is included
+    is(scalar(@classes), 3, 'found three classes');
 
     ok($dom->class('blue'), 'found the blue class');
     ok(!$dom->class('fried'), 'did not find the fried class');

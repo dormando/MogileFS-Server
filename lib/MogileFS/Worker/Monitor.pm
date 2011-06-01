@@ -207,11 +207,12 @@ sub diff_hash {
     my %keys = ();
     map { $keys{$_}++ } keys %$old, keys %$new;
     for my $k (keys %keys) {
-        return 1 unless ((exists $old->{$k} &&
-            exists $new->{$k}) &&
-            ( (! defined $old->{$k} && ! defined $new->{$k}) ||
-            ($old->{$k} eq $new->{$k}) )
-            );
+        return 1 if (exists $old->{$k} && ! exists $new->{$k});
+        return 1 if (exists $new->{$k} && ! exists $old->{$k});
+        return 1 if (defined $old->{$k} && ! defined $new->{$k});
+        return 1 if (defined $new->{$k} && ! defined $old->{$k});
+        return 0 if (! defined $new->{$k} && ! defined $old->{$k});
+        return 1 if ($old->{$k} ne $new->{$k});
     }
     return 0;
 }
