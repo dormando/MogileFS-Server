@@ -4,7 +4,10 @@ package MogileFS::Worker::Replicate;
 use strict;
 use base 'MogileFS::Worker';
 use fields (
-            'fidtodo',   # hashref { fid => 1 }
+            'fidtodo',     # hashref { fid => 1 }
+            'trace',       # tracing on/off
+            'trace_fid', # fid we're tracing
+            'trace_stack', # trace elements
             );
 
 use List::Util ();
@@ -23,11 +26,62 @@ sub new {
     my $self = fields::new($class);
     $self->SUPER::new($psock);
     $self->{fidtodo} = {};
+    $self->{trace}   = 0;
     return $self;
+}
+
+# Flags are generically 16bits? (smallints in mysql)
+# FIXME: Move into MogileFS::Util
+sub parse_replicate_flags {
+    my $flags = shift;
+
+    my %r = ();
+    $r{trace}          = $flags & 0x1;
+    $r{trace_on_error} = $flags & 0x2;
+    return \%r;
 }
 
 # replicator wants
 sub watchdog_timeout { 90; }
+
+sub start_trace {
+    my $self  = shift;
+    my $fid   = shift;
+    my $flags = shift;
+    if ($flags->{trace_on_error}) {
+        $self->{trace} = 2;
+    } elsif ($flags->{trace}) {
+        $self->{trace} = 1;
+    } else {
+        return;
+    }
+    $self->{trace_fid}   = $fid;
+    $self->{trace_stack} = [];
+}
+
+sub trace {
+    my $self = shift;
+    return unless $self->{trace};
+    push(@{$self->{trace_stack}}, @_);
+}
+
+# TODO: Determine how to trigger "trace on error" - extra
+# call/flag/something at the replication status check?
+sub finish_trace {
+    my $self = shift;
+    return unless $self->{trace};
+    my $stack = $self->{trace_stack};
+
+    my $fid = $self->{trace_fid};
+    error("Traced a replication request for fid[$fid]");
+    for my $err (@{$self->{trace_stack}}) {
+        error("trace[$fid]: " . $err);
+    }
+
+    $self->{trace} = 0;
+    $self->{trace_fid}   = 0;
+    $self->{trace_stack} = [];
+}
 
 sub work {
     my $self = shift;
@@ -45,23 +99,33 @@ sub work {
         my $dbh = $self->get_dbh or return 0;
         my $sto = Mgd::get_store();
 
+        # This can probably be an actaul subroutine.
+        my $check_flags = sub {
+            my $flags = parse_replicate_flags($_[0]->{flags});
+            $self->start_trace($_[0]->{fid}, $flags);
+            return $flags;
+        };
+
         while (my $todo = shift @$queue_todo) {
-            my $fid = $todo->{fid};
-            $self->replicate_using_torepl_table($todo);
+            my $flags = $check_flags->($todo);
+            my $ret = $self->replicate_using_torepl_table($todo, $flags);
+            $self->finish_trace($ret);
         }
         while (my $todo = shift @$queue_todo2) {
             $self->still_alive;
+            my $flags = $check_flags->($todo);
             # deserialize the arg :/
             $todo->{arg} = [split /,/, $todo->{arg}];
             my $devfid =
                 MogileFS::DevFID->new($todo->{devid}, $todo->{fid});
-            $self->rebalance_devfid($devfid, 
-                { target_devids => $todo->{arg} });
+            my $ret = $self->rebalance_devfid($devfid, 
+                { target_devids => $todo->{arg}, flags => $flags });
 
             # If files error out, we want to send the error up to syslog
             # and make a real effort to chew through the queue. Users may
             # manually re-run rebalance to retry.
             $sto->delete_fid_from_file_to_queue($todo->{fid}, REBAL_QUEUE);
+            $self->finish_trace($ret);
         }
         $_[0]->(0); # don't sleep.
     });
@@ -70,8 +134,9 @@ sub work {
 # return 1 if we did something (or tried to do something), return 0 if
 # there was nothing to be done.
 sub replicate_using_torepl_table {
-    my $self = shift;
-    my $todo = shift;
+    my $self  = shift;
+    my $todo  = shift;
+    my $flags = shift;
 
     # find some fids to replicate, prioritize based on when they should be tried
     my $sto = Mgd::get_store();
@@ -82,11 +147,12 @@ sub replicate_using_torepl_table {
     my $errcode;
 
     my %opts;
+    $opts{flags}        = $flags;
     $opts{errref}       = \$errcode;
     $opts{no_unlock}    = 1; # to make it return an $unlock subref
     $opts{source_devid} = $todo->{fromdevid} if $todo->{fromdevid};
 
-    my ($status, $unlock) = replicate($fid, %opts);
+    my ($status, $unlock) = $self->replicate($fid, %opts);
 
     if ($status) {
         # $status is either 0 (failure, handled below), 1 (success, we actually
@@ -97,12 +163,13 @@ sub replicate_using_torepl_table {
         # also replicated it), but in the case of running with old
         # replicators from previous versions, -or- simply if the
         # other guy's delete failed, this cleans it up....
+        $self->trace("Successfully replicated");
         $sto->delete_fid_from_file_to_replicate($fid);
         $unlock->() if $unlock;
-        next;
+        return $status;
     }
 
-    debug("Replication of fid=$fid failed with errcode=$errcode") if $Mgd::DEBUG >= 2;
+    $self->trace("Replication of fid=$fid failed with errcode=$errcode");
 
     # ERROR CASES:
 
@@ -129,7 +196,7 @@ sub replicate_using_torepl_table {
     # already did it, so we should just move on
     if ($errcode eq 'failed_getting_lock') {
         $unlock->() if $unlock;
-        next;
+        return 1;
     }
 
     # logic for setting the next try time appropriately
@@ -141,10 +208,13 @@ sub replicate_using_torepl_table {
             # as we've encountered a scenario in which case we're
             # really hosed
             $sto->reschedule_file_to_replicate_absolute($fid, ENDOFTIME);
+            $self->trace("Rescheduled to ENDOFTIME (permanent error)");
         } elsif ($type eq "offset") {
             $sto->reschedule_file_to_replicate_relative($fid, $delay+0);
+            $self->trace("Rescheduled for the future (relative) by " . $delay+0);
         } else {
             $sto->reschedule_file_to_replicate_absolute($fid, $delay+0);
+            $self->trace("Rescheduled for the future (absolute) by " . $delay+0);
         }
     };
 
@@ -154,7 +224,7 @@ sub replicate_using_torepl_table {
     if ($errcode eq 'no_source') {
         $update_nexttry->( end_of_time => 1 );
         $unlock->() if $unlock;
-        next;
+        return 0;
     }
 
     # try to shake off extra copies. fall through to the backoff logic
@@ -174,11 +244,12 @@ sub replicate_using_torepl_table {
             # We must be able to delete off of this dev so the fid can
             # move.
             if ($dev->can_delete_from && $dev->can_read_from) {
+                $self->trace("Attempting to rebalance off of dev" . $dev->id);
                 $devfid = MogileFS::DevFID->new($dev, $f);
                 last;
             }
         }
-        $self->rebalance_devfid($devfid) if $devfid;
+        $self->rebalance_devfid($devfid, { flags => $flags }) if $devfid;
     }
 
     # at this point, the rest of the errors require exponential backoff.  define what this means
@@ -187,14 +258,14 @@ sub replicate_using_torepl_table {
     my @backoff = qw( 15 60 300 1800 3600 7200 14400 28800 );
     $update_nexttry->( offset => int(($backoff[$todo->{failcount}] || 86400) * (rand(0.4) + 0.8)) );
     $unlock->() if $unlock;
-    return 1;
+    return 0;
 }
 
 # Return 1 on success, 0 on failure.
 sub rebalance_devfid {
     my ($self, $devfid, $opts) = @_;
     $opts ||= {};
-    MogileFS::Util::okay_args($opts, qw(avoid_devids target_devids));
+    MogileFS::Util::okay_args($opts, qw(avoid_devids target_devids flags));
 
     my $fid = $devfid->fid;
 
@@ -207,11 +278,12 @@ sub rebalance_devfid {
     return 1 if ! $fid->exists;
 
     my $errcode;
-    my ($ret, $unlock) = replicate($fid,
+    my ($ret, $unlock) = $self->replicate($fid,
                                    mask_devids  => { $devfid->devid => 1 },
                                    no_unlock    => 1,
                                    target_devids => $opts->{target_devids},
                                    errref       => \$errcode,
+                                   flags        => $opts->{flags},
                                    );
 
     my $fail = sub {
@@ -240,6 +312,7 @@ sub rebalance_devfid {
         if ($devfid->exists) {
             # over-replicated
 
+            $self->trace("Over replicated, picking a dev to remove");
             # see if some copy, besides this one we want
             # to delete, is currently alive & of right size..
             # just as extra paranoid check before we delete it
@@ -251,8 +324,10 @@ sub rebalance_devfid {
                     last;
                 }
             }
+            $self->trace("Can't find a second valid copy, cannot complete rebalance")
+                unless $should_delete;
         } else {
-            # lost race
+            $self->trace("Lost the rebalance race, doing no work");
             $should_delete = 0;  # no-op
         }
     } elsif ($ret eq "would_worsen") {
@@ -279,6 +354,7 @@ sub rebalance_devfid {
     }
 
     $unlock->();
+    $self->trace("Finished attempting a rebalance");
     return 1;
 }
 
@@ -296,7 +372,7 @@ sub rebalance_devfid {
 #    "lost_race" = skipping, we did no work and policy was already met.
 #    "nofid" => fid no longer exists. skip replication.
 sub replicate {
-    my ($fid, %opts) = @_;
+    my ($self, $fid, %opts) = @_;
     $fid = MogileFS::FID->new($fid) unless ref $fid;
     my $fidid = $fid->id;
 
@@ -308,11 +384,18 @@ sub replicate {
     my $mask_devids  = delete $opts{'mask_devids'}  || {};
     my $avoid_devids = delete $opts{'avoid_devids'} || {};
     my $target_devids = delete $opts{'target_devids'} || []; # inverse of avoid_devids.
+    my $flags     = delete $opts{'flags'} || {};
     die "unknown_opts" if %opts;
     die unless ref $mask_devids eq "HASH";
 
     # bool:  if source was explicitly requested by caller
     my $fixed_source = $sdevid ? 1 : 0;
+
+    # FIXME: Should also trace avoid_devids, but it looks like that's
+    # vestigial code from back when unreachable_fids existed. nuke it?
+    if (my $masked = join(',', keys %$mask_devids)) {
+        $self->trace("Replicating with devids masked: " . $masked);
+    }
 
     my $sto = Mgd::get_store();
     my $unlock = sub {
@@ -334,9 +417,11 @@ sub replicate {
         if ($errcode && $errcode eq "failed_getting_lock") {
             # don't emit a warning with error() on lock failure.  not
             # a big deal, don't scare people.
+            $self->trace($errmsg);
             $ret = 0;
         } else {
             $ret = $rv ? $rv : error($errmsg);
+            $self->trace("Return code from replicate: $ret");
         }
         if ($no_unlock) {
             die "ERROR: must be called in list context w/ no_unlock" unless wantarray;
@@ -361,21 +446,27 @@ sub replicate {
 
     my $cls = $fid->class;
     my $polobj = $cls->repl_policy_obj;
+    $self->trace("Using replication policy: " . $cls->repl_policy_string);
 
     # learn what this devices file is already on
     my @on_devs;         # all devices fid is on, reachable or not.
     my @on_devs_tellpol; # subset of @on_devs, to tell the policy class about
     my @on_up_devid;     # subset of @on_devs:  just devs that are readable
 
+    $self->trace("Walking devices fid is supposed to be on");
     foreach my $devid ($fid->devids) {
+        $self->trace("Confirming state of dev$devid");
         my $d = Mgd::device_factory()->get_by_id($devid)
             or next;
         push @on_devs, $d;
+        $self->trace("dev$devid still exists");
         if ($d->dstate->should_have_files && ! $mask_devids->{$devid}) {
             push @on_devs_tellpol, $d;
+            $self->trace("dev$devid should have files and is not masked");
         }
         if ($d->dstate->can_read_from) {
             push @on_up_devid, $devid;
+            $self->trace("dev$devid is readable");
         }
     }
 
@@ -395,6 +486,12 @@ sub replicate {
     my $dest_devs = $devs;
     if (@$target_devids) {
         $dest_devs = {map { $_ => $devs->{$_} } @$target_devids};
+        $self->trace("Using overridden target devids: "
+            . join(',', keys %$dest_devs));
+    } else {
+        my @devids = keys %$devs;
+        $self->trace("Using default target devids: "
+            . join(',', splice(@devids, 0, 20)) . ",...");
     }
 
     my $rr;  # MogileFS::ReplicationRequest
@@ -412,6 +509,8 @@ sub replicate {
         my @ddevs;  # dest devs, in order of preference
         my $ddevid; # dest devid we've chosen to copy to
         if (@ddevs = $rr->copy_to_one_of_ideally) {
+            $self->trace("Policy considers ideal devices: "
+                . join(',', map { $_->id } @ddevs));
             if (my @not_masked_ids = (grep { ! $mask_devids->{$_} &&
                                              ! $avoid_devids->{$_}
                                          }
@@ -440,6 +539,8 @@ sub replicate {
         } elsif (@ddevs = $rr->copy_to_one_of_desperate) {
             # TODO: reschedule a replication for 'n' minutes in future, or
             # when new hosts/devices become available or change state
+            $self->trace("Policy considers desperate devices: "
+                . join(',', map { $_->id } @ddevs));
             $ddevid = $ddevs[0]->id;
         } else {
             last;
@@ -473,6 +574,7 @@ sub replicate {
         }
 
         my $worker = MogileFS::ProcManager->is_child or die;
+        $self->trace("Attempting to copy from $sdevid to $ddevid");
         my $rv = http_copy(
                            sdevid       => $sdevid,
                            ddevid       => $ddevid,
@@ -515,6 +617,8 @@ sub replicate {
     }
 
     if ($rr->is_happy) {
+        $self->trace("Replicated new copies and policy is now happy")
+            if $got_copy_request;
         return $retunlock->(1) if $got_copy_request;
         return $retunlock->("lost_race");  # some other process got to it first.  policy was happy immediately.
     }
