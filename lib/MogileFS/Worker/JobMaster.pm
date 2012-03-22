@@ -128,7 +128,7 @@ sub _check_fsck_queues {
     return unless $need_fetch;
     my @to_fsck = $sto->grab_files_to_queued(FSCK_QUEUE,
         'type, flags', $new_limit);
-    $self->{fsck_queue_limit} = @to_fsck ? $new_limit : 100;
+    $self->{fsck_queue_limit} = @to_fsck ? $new_limit : ($new_limit - 75);
     return unless @to_fsck;
     for my $todo (@to_fsck) {
         $self->send_to_parent("queue_todo fsck " . encode_url_args($todo));
@@ -266,6 +266,7 @@ sub queue_depth_check {
             || 500;
 
     my ($depth, $limit) = @_;
+    $limit = 100 if $limit < 100;
     if ($depth == 0) {
         $limit += 50 unless $limit >= $max_limit;
         return (1, $limit);

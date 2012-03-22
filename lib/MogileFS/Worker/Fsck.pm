@@ -48,7 +48,7 @@ sub work {
 
         my $queue_todo = $self->queue_todo('fsck');
         # This counts the same as a $self->still_alive;
-        $self->send_to_parent('worker_bored 50 fsck');
+        $self->send_to_parent('worker_bored 25 fsck');
         return unless @{$queue_todo};
         return unless $self->validate_dbh;
 
